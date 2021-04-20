@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # todo : licence
 # Description: todo
 #
@@ -66,11 +66,6 @@ class GetGPPasswords(object):
         if self.username.find('/') > 0:
             self.domain, self.username = self.username.split('/')
 
-        # Todo : handle empty password case
-        # if password == "" and username != "":
-        #     from getpass import getpass
-        #     password = getpass("Password:")
-
         self.smb.login(self.username, self.password, domain=self.domain)
 
         if self.smb.isGuestSession() > 0:
@@ -132,7 +127,10 @@ class GetGPPasswords(object):
             fh = BytesIO()
             try:
                 self.smb.getFile(self.share, filename, fh.write)
-            except:
+            except SessionError as e:
+                logging.error(e)
+                return results
+            except Exception as e:
                 raise
             output = fh.getvalue()
             encoding = chardet.detect(output)["encoding"]
@@ -142,14 +140,14 @@ class GetGPPasswords(object):
                 logging.debug(filecontent)
                 root = minidom.parseString(filecontent)
                 properties_list = root.getElementsByTagName("Properties")
-                # todo : handle empty list, no match
+                read_or_empty = lambda element,attribute : (element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
                 for properties in properties_list:
                     results.append({
-                        'newname': properties.getAttribute('newName'), # todo : can be empty
-                        'changed': properties.parentNode.getAttribute('changed'),
-                        'cpassword': properties.getAttribute('cpassword'),
-                        'password': self.decrypt_password(properties.getAttribute('cpassword')),
-                        'username': properties.getAttribute('userName'),
+                        'newname': read_or_empty(properties,'newName'), # todo : can be empty
+                        'changed': read_or_empty(properties.parentNode,'changed'),
+                        'cpassword': read_or_empty(properties,'cpassword'),
+                        'password': self.decrypt_password(read_or_empty(properties,'cpassword')),
+                        'username': read_or_empty(properties,'userName'),
                         'file': filename
                     })
                 fh.close()
@@ -179,8 +177,7 @@ class GetGPPasswords(object):
             logging.info(f"Changed\t: {result['changed']}")
             logging.info(f"Username\t: {result['username']}")
             logging.info(f"Password\t: {result['password']}")
-            logging.info(f"File\t: {result['file']}\n")
-
+            logging.info(f"File\t\t: {result['file']}\n")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Group Policy Preferences passwords finder and decryptor')
@@ -189,7 +186,6 @@ def parse_args():
     # todo : add pth support (-hashes)
     # group.add_argument('-hashes', action="store", metavar="LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH') # todo : enable this
     # todo : add -root-directories (find another name) (default to Policies)
-    # parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON') # todo : enable this
     parser.add_argument("-d", "--domain", type=str, required=False, default="", help="SMB Password")
     parser.add_argument("-u", "--username", type=str, required=False, default="", help="SMB Username")
     parser.add_argument("-p", "--password", type=str, required=False, default="", help="SMB Password")
@@ -221,4 +217,3 @@ if __name__ == '__main__':
     files = g.find_files()
     results = g.parse(files)
     g.show(results)
-
