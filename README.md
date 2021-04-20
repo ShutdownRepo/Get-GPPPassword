@@ -2,35 +2,87 @@
 
 Python script for extracting and decrypting Group Policy Preferences passwords.
 
+## Examples
+NULL session
+````shell
+python3 Get-GPPPassword.py -no-pass domain_controller
+````
+Username, password
+````shell
+python3 Get-GPPPassword.py domain.local/someuser:somepassword@domain_controller
+````
+Pass-the-hash
+````shell
+python3 Get-GPPPassword.py -hashes [LMhash]:NThash domain.local/someuser@domain_controller
+````
+Pass-the-ticket (partial ptt)
+````shell
+export KRB5CCNAME=someuser.ccache
+python3 Get-GPPPassword.py -k domain_controller
+````
+Pass-the-key
+````shell
+python3 Get-GPPPassword.py -aesKey aesKey domain.local/someuser@domain_controller
+````
+Overpass-the-hash (check that it actually does opth)
+````shell
+python3 Get-GPPPassword.py -k -hashes [LMhash]:NThash domain.local/someuser@domain_controller
+````
+
 ## Usage
 
 ```
-Impacket v0.9.22 - Copyright 2020 SecureAuth Corporation
+usage: Get-GPPPassword.py [-h] [-share SHARE] [-base-dir BASE_DIR] [-ts]
+                          [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k]
+                          [-aesKey hex key] [-dc-ip ip address]
+                          [-target-ip ip address] [-port [destination port]]
+                          target
 
-usage: Get-GPPPassword.py [-h] [-d DOMAIN]
-                          [-u USERNAME]
-                          [-p PASSWORD]
-                          [-share SHARE] [-P PORT]
-                          [-debug] [-ts]
-                          server
-
-Group Policy Preferences passwords finder and
-decryptor
+Group Policy Preferences passwords finder and decryptor
 
 positional arguments:
-  server                Target SMB server address
+  target                [[domain/]username[:password]@]<targetName or address>
 
 optional arguments:
-  -h, --help            show this help message and
-                        exit
-  -d DOMAIN, --domain DOMAIN
-                        SMB Password
-  -u USERNAME, --username USERNAME
-                        SMB Username
-  -p PASSWORD, --password PASSWORD
-                        SMB Password
+  -h, --help            show this help message and exit
   -share SHARE          SMB Share
-  -P PORT, --port PORT  Server port
-  -debug
-  -ts                   Adds timestamp to every
+  -base-dir BASE_DIR    Directory to search in (Default: /)
+  -ts                   Adds timestamp to every logging output
+  -debug                Turn DEBUG output ON
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME) based on target parameters.
+                        If valid credentials cannot be found, it will use the
+                        ones specified in the command line
+  -aesKey hex key       AES key to use for Kerberos Authentication (128 or 256
+                        bits)
+
+connection:
+  -dc-ip ip address     IP Address of the domain controller. If omitted it
+                        will use the domain part (FQDN) specified in the
+                        target parameter
+  -target-ip ip address
+                        IP Address of the target machine. If omitted it will
+                        use whatever was specified as target. This is useful
+                        when target is the NetBIOS name and you cannot resolve
+                        it
+  -port [destination port]
+                        Destination port to connect to SMB Server
 ```
+
+# Credits
+
+Thanks to
+- mxrch for the code allowing to read files in stream instead of downloading them
+- the Impacket project for handling the connections, auth, socket parts
+- Microsoft for releasing the AES encryption key for the cpasswords
+- the best, @podalirius_ for coding almost everything that my 5-year-old brain couldn't.
+
+# ToDo list
+- add a setup file for installing the script
+- GIF in the README ?
+- licence in the header of the python script
