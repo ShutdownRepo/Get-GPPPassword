@@ -86,47 +86,55 @@ class GetGPPasswords(object):
         output = fh.getvalue()
         encoding = chardet.detect(output)["encoding"]
         if encoding != None:
-            filecontent = output.decode(encoding)
+            filecontent = output.decode(encoding).rstrip()
             if 'cpassword' in filecontent:
                 logging.debug(filecontent)
-                root = minidom.parseString(filecontent)
-                properties_list = root.getElementsByTagName("Properties")
-                # function to get attribute if it exists, returns "" if empty
-                read_or_empty = lambda element, attribute: (
-                    element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
-                for properties in properties_list:
-                    results.append({
-                        'newname': read_or_empty(properties, 'newName'),
-                        'changed': read_or_empty(properties.parentNode, 'changed'),
-                        'cpassword': read_or_empty(properties, 'cpassword'),
-                        'password': self.decrypt_password(read_or_empty(properties, 'cpassword')),
-                        'username': read_or_empty(properties, 'userName'),
-                        'file': filename
-                    })
+                try:
+                    root = minidom.parseString(filecontent)
+                    properties_list = root.getElementsByTagName("Properties")
+                    # function to get attribute if it exists, returns "" if empty
+                    read_or_empty = lambda element, attribute: (
+                        element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
+                    for properties in properties_list:
+                        results.append({
+                            'newname': read_or_empty(properties, 'newName'),
+                            'changed': read_or_empty(properties.parentNode, 'changed'),
+                            'cpassword': read_or_empty(properties, 'cpassword'),
+                            'password': self.decrypt_password(read_or_empty(properties, 'cpassword')),
+                            'username': read_or_empty(properties, 'userName'),
+                            'file': filename
+                        })
+                except Exception as e:
+                    if logging.getLogger().level == logging.DEBUG:
+                        traceback.print_exc()
+                    logging.debug(str(e))
                 fh.close()
             else:
                 logging.debug("No cpassword was found in %s" % filename)
         else:
-            logging.error("Output cannot be correctly decoded, are you sure the text is readable ?")
+            logging.debug("Output cannot be correctly decoded, are you sure the text is readable ?")
             fh.close()
-        print()
         return results
 
     def decrypt_password(self, pw_enc_b64):
-        # thank you MS for publishing the key :) (https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/2c15cbf0-f086-4c74-8b70-1f2fa45dd4be)
-        key = b'\x4e\x99\x06\xe8\xfc\xb6\x6c\xc9\xfa\xf4\x93\x10\x62\x0f\xfe\xe8\xf4\x96\xe8\x06\xcc\x05\x79\x90\x20' \
-              b'\x9b\x09\xa4\x33\xb6\x6c\x1b'
-        # thank you MS for using a fixed IV :)
-        iv = b'\x00' * 16
-        pad = len(pw_enc_b64) % 4
-        if pad == 1:
-            pw_enc_b64 = pw_enc_b64[:-1]
-        elif pad == 2 or pad == 3:
-            pw_enc_b64 += '=' * (4 - pad)
-        pw_enc = base64.b64decode(pw_enc_b64)
-        ctx = AES.new(key, AES.MODE_CBC, iv)
-        pw_dec = unpad(ctx.decrypt(pw_enc), ctx.block_size)
-        return pw_dec.decode('utf-16-le')
+        if len(pw_enc_b64) != 0:
+            # thank you MS for publishing the key :) (https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/2c15cbf0-f086-4c74-8b70-1f2fa45dd4be)
+            key = b'\x4e\x99\x06\xe8\xfc\xb6\x6c\xc9\xfa\xf4\x93\x10\x62\x0f\xfe\xe8\xf4\x96\xe8\x06\xcc\x05\x79\x90\x20' \
+                  b'\x9b\x09\xa4\x33\xb6\x6c\x1b'
+            # thank you MS for using a fixed IV :)
+            iv = b'\x00' * 16
+            pad = len(pw_enc_b64) % 4
+            if pad == 1:
+                pw_enc_b64 = pw_enc_b64[:-1]
+            elif pad == 2 or pad == 3:
+                pw_enc_b64 += '=' * (4 - pad)
+            pw_enc = base64.b64decode(pw_enc_b64)
+            ctx = AES.new(key, AES.MODE_CBC, iv)
+            pw_dec = unpad(ctx.decrypt(pw_enc), ctx.block_size)
+            return pw_dec.decode('utf-16-le')
+        else:
+            logging.debug("cpassword is empty, cannot decrypt anything")
+            return ""
 
     def show(self, results):
         for result in results:
