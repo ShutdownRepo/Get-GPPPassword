@@ -1,6 +1,6 @@
 # Get-GPPPassword
 
-Python script for extracting and decrypting Group Policy Preferences passwords.
+Python script for extracting and decrypting Group Policy Preferences passwords, using Impacket's lib, and using streams for carving files instead of mounting shares
 
 ## Examples
 
@@ -22,7 +22,7 @@ Pass-the-hash
 python3 Get-GPPPassword.py -hashes [LMhash]:NThash domain.local/someuser@domain_controller
 ````
 
-Pass-the-ticket (partial ptt)
+Pass-the-ticket
 
 ````shell
 export KRB5CCNAME=someuser.ccache
@@ -35,7 +35,7 @@ Pass-the-key
 python3 Get-GPPPassword.py -aesKey aesKey domain.local/someuser@domain_controller
 ````
 
-Overpass-the-hash (check that it actually does opth)
+Overpass-the-hash
 
 ````shell
 python3 Get-GPPPassword.py -k -hashes [LMhash]:NThash domain.local/someuser@domain_controller
@@ -89,12 +89,10 @@ connection:
 # Credits
 
 Thanks to :
-- mxrch for the code allowing to read files in stream instead of downloading them.
-- the Impacket project for handling the connections, auth, socket parts.
-- Microsoft for releasing the AES encryption key for the cpasswords.
+- [mxrch](https://twitter.com/mxrchreborn) for the code allowing to read files in stream instead of downloading them.
+- [Impacket](https://github.com/SecureAuthCorp/impacket) for handling the connections, auth, socket parts.
+- [Microsoft](https://www.youtube.com/watch?v=dQw4w9WgXcQ) for [releasing the AES encryption key](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/2c15cbf0-f086-4c74-8b70-1f2fa45dd4be) for the cpasswords.
 - the best, [@podalirius_](https://twitter.com/@podalirius_) for coding almost everything that my 5-year-old brain couldn't.
 
 # ToDo list
-- add a setup file for installing the script
-- GIF in the README ?
-- licence in the header of the python script
+- GIF in the README

