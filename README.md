@@ -2,6 +2,8 @@
 
 Python script for extracting and decrypting Group Policy Preferences passwords, using Impacket's lib, and using streams for carving files instead of mounting shares
 
+![example GIF](.assets/example.gif)
+
 ## Examples
 
 NULL session
@@ -93,6 +95,3 @@ Thanks to :
 - [Impacket](https://github.com/SecureAuthCorp/impacket) for handling the connections, auth, socket parts.
 - [Microsoft](https://www.youtube.com/watch?v=dQw4w9WgXcQ) for [releasing the AES encryption key](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/2c15cbf0-f086-4c74-8b70-1f2fa45dd4be) for the cpasswords.
 - the best, [@podalirius_](https://twitter.com/@podalirius_) for coding almost everything that my 5-year-old brain couldn't.
-
-# ToDo list
-- GIF in the README
