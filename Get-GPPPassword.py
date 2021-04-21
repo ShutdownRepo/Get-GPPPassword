@@ -18,8 +18,8 @@ import traceback
 from xml.dom import minidom
 from io import BytesIO
 
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import unpad
 
 from impacket import version
 from impacket.examples import logger
