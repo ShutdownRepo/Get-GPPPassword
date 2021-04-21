@@ -4,6 +4,10 @@ Python script for extracting and decrypting Group Policy Preferences passwords, 
 
 ![example GIF](.assets/example.gif)
 
+## Install
+
+This script can be run in standalone (`python3 -m pip install -r requirements.txt`) or added in Impacket (`cd /path/to/impacket; cp Get-GPPPassword.py examples/; python3 -m pip install .`).
+
 ## Examples
 
 NULL session
