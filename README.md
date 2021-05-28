@@ -1,3 +1,5 @@
+⚠️ **THIS PROJECT IS DISCONTINUED SINCE IT HAS BEEN OFFICIALLY ADDED TO [IMPACKET](https://github.com/SecureAuthCorp/impacket)** ⚠️
+
 # Get-GPPPassword
 
 Python script for extracting and decrypting Group Policy Preferences passwords, using Impacket's lib, and using streams for carving files instead of mounting shares
