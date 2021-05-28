@@ -1,4 +1,4 @@
-⚠️ **THIS PROJECT IS DISCONTINUED SINCE IT HAS BEEN OFFICIALLY ADDED TO [IMPACKET](https://github.com/SecureAuthCorp/impacket)** ⚠️
+⚠️ **THIS REPO IS DISCONTINUED SINCE IT HAS BEEN OFFICIALLY ADDED TO [IMPACKET](https://github.com/SecureAuthCorp/impacket). IT WILL ONLY BE MAINTAINED THERE** ⚠️
 
 # Get-GPPPassword
 
